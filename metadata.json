@@ -1,0 +1,7 @@
+{
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "name": "粒子特效",
+  "description": "Offline Particle Magic"
+}
