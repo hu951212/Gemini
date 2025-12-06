@@ -300,7 +300,7 @@ const App = () => {
   const [isRunning, setIsRunning] = useState(false);
   const [currentGesture, setCurrentGesture] = useState<string>("none");
   const [modelLoaded, setModelLoaded] = useState(false);
-  const [debugMsg, setDebugMsg] = useState("Initializing...");
+  const [debugMsg, setDebugMsg] = useState("Loading Local AI...");
   const [showHelp, setShowHelp] = useState(false);
   
   const particlesRef = useRef<Particle[]>([]);
@@ -463,13 +463,23 @@ const App = () => {
           try {
               setDebugMsg("Checking offline cache...");
               
-              const vision = await FilesetResolver.forVisionTasks(
-                  "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.8/wasm"
-              );
+              // 1. Setup Vision Resolver (WASM)
+              // Try CDN first, fallback to local path if offline
+              let wasmPath = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.8/wasm";
+              try {
+                  await fetch(wasmPath + "/vision_wasm_internal.wasm", { method: 'HEAD' });
+              } catch (e) {
+                  console.warn("CDN unreachable, switching to local WASM");
+                  wasmPath = "./"; // Expects vision_wasm_internal.wasm in root
+              }
 
+              const vision = await FilesetResolver.forVisionTasks(wasmPath);
+
+              // 2. Setup Model (.task)
               const modelUrl = `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`;
               let finalModelPath = modelUrl;
 
+              // Try cache API first
               if ('caches' in window) {
                 const cacheName = 'particle-magic-v1';
                 try {
@@ -480,16 +490,26 @@ const App = () => {
                         const blob = await cachedResponse.blob();
                         finalModelPath = URL.createObjectURL(blob);
                     } else {
-                        setDebugMsg("Downloading Model (approx 10MB)...");
-                        const response = await fetch(modelUrl);
-                        if(response.ok) {
-                            cache.put(modelUrl, response.clone());
-                            const blob = await response.blob();
-                            finalModelPath = URL.createObjectURL(blob);
+                        // If online, download and cache
+                        setDebugMsg("Downloading Model (10MB)...");
+                        try {
+                            const response = await fetch(modelUrl);
+                            if(response.ok) {
+                                cache.put(modelUrl, response.clone());
+                                const blob = await response.blob();
+                                finalModelPath = URL.createObjectURL(blob);
+                            } else {
+                                throw new Error("Network fetch failed");
+                            }
+                        } catch (err) {
+                            // If fetch fails (offline & no cache), try local fallback
+                            console.warn("Network fetch failed, trying local file.");
+                            finalModelPath = "./hand_landmarker.task";
                         }
                     }
                 } catch (e) {
-                    console.warn("Cache fallback", e);
+                    console.warn("Cache access failed", e);
+                    finalModelPath = "./hand_landmarker.task";
                 }
               }
 
@@ -502,11 +522,11 @@ const App = () => {
                   numHands: 1
               });
               setModelLoaded(true);
-              setDebugMsg("Ready. Click to Start.");
+              setDebugMsg("Start Camera & AI");
           } catch (e) {
               console.error("Failed to load MediaPipe model", e);
-              setDebugMsg("Error. Check connection.");
-              alert("Failed to load AI model.");
+              setDebugMsg("Offline Mode Error");
+              setShowHelp(true); // Auto show help if loading fails
           }
       };
       loadModel();
@@ -617,6 +637,9 @@ const App = () => {
       <div style={{ position: "absolute", top: 20, left: 20, color: "white", zIndex: 10, pointerEvents: "none" }}>
         <h1 style={{ margin: 0, fontSize: "2rem", textShadow: "0 0 15px rgba(255, 215, 0, 0.8)", fontFamily: "'Segoe UI', Roboto, sans-serif" }}>Firework Magic</h1>
         <p style={{ margin: "5px 0", fontSize: "1rem", color: "#ccc" }}>
+            Local AI • No API Key Needed
+        </p>
+        <p style={{ margin: "5px 0", fontSize: "0.9rem", color: "#888" }}>
           🖐 1-5 fingers for 3D Burning Numbers <br/>
           ✊ Fist for Fireworks
         </p>
@@ -679,13 +702,15 @@ const App = () => {
               background: "rgba(0,0,0,0.9)", padding: "30px", borderRadius: "15px", border: "1px solid #FFD700",
               zIndex: 100, maxWidth: "500px", color: "white", lineHeight: "1.5"
           }}>
-              <h2 style={{marginTop: 0, color: "#FFD700"}}>Offline Setup</h2>
-              <p>To run without internet, place these files in the same folder as index.html:</p>
-              <ul style={{fontSize: "0.9em", color: "#aaa"}}>
-                  <li><a href="https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task" target="_blank" style={{color:"#FF4400"}}>hand_landmarker.task</a></li>
-                  <li><a href="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.8/wasm/vision_wasm_internal.wasm" target="_blank" style={{color:"#FF4400"}}>vision_wasm_internal.wasm</a></li>
-                  <li><a href="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.8/wasm/vision_wasm_internal.js" target="_blank" style={{color:"#FF4400"}}>vision_wasm_internal.js</a></li>
+              <h2 style={{marginTop: 0, color: "#FFD700"}}>Fully Offline Mode</h2>
+              <p>This app uses <strong>MediaPipe (Local AI)</strong>. No API key is required.</p>
+              <p>For fully air-gapped usage (no internet), download these 3 files and place them in the same folder as index.html:</p>
+              <ul style={{fontSize: "0.9em", color: "#aaa", listStyle: "none", paddingLeft: 0}}>
+                  <li style={{marginBottom: "5px"}}>1. <a href="https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task" download style={{color:"#FF4400"}}>hand_landmarker.task</a></li>
+                  <li style={{marginBottom: "5px"}}>2. <a href="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.8/wasm/vision_wasm_internal.wasm" download style={{color:"#FF4400"}}>vision_wasm_internal.wasm</a></li>
+                  <li style={{marginBottom: "5px"}}>3. <a href="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.8/wasm/vision_wasm_internal.js" download style={{color:"#FF4400"}}>vision_wasm_internal.js</a></li>
               </ul>
+              <p style={{fontSize: "0.8em"}}>* Note: To run locally, use a local server (e.g., Python `http.server` or Web Server for Chrome) instead of double-clicking the file.</p>
               <button onClick={() => setShowHelp(false)} style={{
                   background: "#333", border: "none", color: "white", padding: "8px 20px", borderRadius: "5px", cursor: "pointer", marginTop: "10px"
               }}>Close</button>
